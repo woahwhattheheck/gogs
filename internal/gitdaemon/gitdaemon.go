@@ -64,6 +64,7 @@ type request struct {
 	path        string // repository path relative to the repository root, e.g. "owner/repo.git"
 	owner       string // lowercased owner name for database lookup
 	repo        string // lowercased repository name for database lookup
+	wiki        bool   // whether the request targets the repository's wiki
 	gitProtocol string // explicitly requested, supported protocol negotiation (v1 or v2)
 }
 
@@ -134,24 +135,35 @@ func parseRequest(payload []byte) (*request, error) {
 	// The path must have the form "<owner>/<repo>.git" (or "<owner>/<repo>.wiki.git"
 	// for wikis). Resolve the repository name and reject anything else,
 	// including traversal attempts.
-	repoPath = strings.TrimPrefix(repoPath, "/")
+	repoPath = strings.ToLower(strings.TrimPrefix(repoPath, "/"))
 	name := strings.TrimSuffix(repoPath, ".git")
 	fields = strings.Split(name, "/")
 	if len(fields) != 2 || strings.ContainsAny(repoPath, "\\") {
 		return nil, errors.Errorf("invalid repository path %q", repoPath)
 	}
 	ownerName, repoName := fields[0], fields[1]
+	repoName, wiki := strings.CutSuffix(repoName, ".wiki")
 	if ownerName == "" || repoName == "" || ownerName == "." || repoName == "." ||
 		strings.HasPrefix(ownerName, "..") || strings.HasPrefix(repoName, "..") {
 		return nil, errors.Errorf("invalid repository path %q", repoPath)
 	}
-	repoName = strings.TrimSuffix(repoName, ".wiki")
+
+	// Hand Git a canonical path built from the validated names instead of the
+	// client-supplied one. Git resolves "<repo>.wiki" to "<repo>.wiki.git" by
+	// itself, so passing the raw path through would serve a wiki that was not
+	// checked against the wiki access policy.
+	gitPath := ownerName + "/" + repoName
+	if wiki {
+		gitPath += ".wiki"
+	}
+	gitPath += ".git"
 
 	return &request{
-		service: service,
-		path:    strings.ToLower(repoPath),
-		owner:   strings.ToLower(ownerName),
-		repo:    strings.ToLower(repoName),
+		service:     service,
+		path:        gitPath,
+		owner:       ownerName,
+		repo:        repoName,
+		wiki:        wiki,
 		gitProtocol: requestedGitProtocol(payload),
 	}, nil
 }
@@ -218,7 +230,7 @@ func handleConn(conn net.Conn, sessionTimeout time.Duration) {
 	}
 
 	// Public Git access must not expose a disabled or externally hosted wiki.
-	if !canServeAnonymousGit(repo, strings.HasSuffix(req.path, ".wiki.git"), conf.Auth.RequireSigninView) {
+	if !canServeAnonymousGit(repo, req.wiki, conf.Auth.RequireSigninView) {
 		fail("access denied", nil)
 		return
 	}

@@ -80,6 +80,7 @@ func TestParseRequest(t *testing.T) {
 		expPath    string
 		expOwner   string
 		expRepo    string
+		expProtocol string
 	}{
 		{
 			name:       "upload-pack with host parameter",
@@ -92,6 +93,32 @@ func TestParseRequest(t *testing.T) {
 		{
 			name:       "upload-pack with protocol version",
 			payload:    "git-upload-pack /alice/repo.git\x00host=example.com\x00\x00version=1\x00",
+			expProtocol: "version=1",
+			expService: "git-upload-pack",
+			expPath:    "alice/repo.git",
+			expOwner:   "alice",
+			expRepo:    "repo",
+		},
+		{
+			name:       "upload-pack Git protocol v2",
+			payload:    "git-upload-pack /alice/repo.git\x00host=example.com\x00\x00version=2\x00",
+			expService: "git-upload-pack",
+			expPath:    "alice/repo.git",
+			expOwner:   "alice",
+			expRepo:    "repo",
+			expProtocol: "version=2",
+		},
+		{
+			name:       "unrecognized protocol extra is ignored",
+			payload:    "git-upload-pack /alice/repo.git\x00host=example.com\x00\x00GIT_PROTOCOL=version=2\x00version=3\x00",
+			expService: "git-upload-pack",
+			expPath:    "alice/repo.git",
+			expOwner:   "alice",
+			expRepo:    "repo",
+		},
+		{
+			name:       "unseparated version in host is ignored",
+			payload:    "git-upload-pack /alice/repo.git\x00host=example.com\x00version=2\x00",
 			expService: "git-upload-pack",
 			expPath:    "alice/repo.git",
 			expOwner:   "alice",
@@ -179,6 +206,7 @@ func TestParseRequest(t *testing.T) {
 			assert.Equal(t, test.expPath, got.path)
 			assert.Equal(t, test.expOwner, got.owner)
 			assert.Equal(t, test.expRepo, got.repo)
+			assert.Equal(t, test.expProtocol, got.gitProtocol)
 		})
 	}
 }

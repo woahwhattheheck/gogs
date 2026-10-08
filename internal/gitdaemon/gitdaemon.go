@@ -32,10 +32,10 @@ const maxRequestLineLen = 1024
 
 // request is a parsed Git protocol service request.
 type request struct {
-	service string // e.g. "git-upload-pack"
-	path    string // repository path relative to the repository root, e.g. "owner/repo.git"
-	owner   string // lowercased owner name for database lookup
-	repo    string // lowercased repository name for database lookup
+	service     string // e.g. "git-upload-pack"
+	path        string // repository path relative to the repository root, e.g. "owner/repo.git"
+	owner       string // lowercased owner name for database lookup
+	repo        string // lowercased repository name for database lookup
 	gitProtocol string // explicitly requested, supported protocol negotiation (v1 or v2)
 }
 

@@ -203,6 +203,12 @@ func TestParseRequest(t *testing.T) {
 			expErr:  true,
 		},
 		{
+			name:    "missing NUL terminator",
+			payload: "git-upload-pack /alice/repo.git",
+			expErr:  true,
+		},
+
+		{
 			name:    "path traversal",
 			payload: "git-upload-pack /../../secret.git\x00host=example.com\x00",
 			expErr:  true,

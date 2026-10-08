@@ -254,7 +254,7 @@ func TestGitSessionLimits(t *testing.T) {
 	assert.Equal(t, 15*time.Minute, timeout)
 
 	maxConnections, timeout = gitSessionLimits(conf.GitProtocolOpts{
-		MaxConnections: 2,
+		MaxConnections:        2,
 		SessionTimeoutSeconds: 45,
 	})
 	assert.Equal(t, 2, maxConnections)

@@ -2,7 +2,10 @@ package gitdaemon
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -293,4 +296,29 @@ func TestGitSessionAdmission(t *testing.T) {
 	assert.False(t, tryAdmitGitSession(slots), "an occupied Git subprocess slot must reject new sessions")
 	<-slots
 	assert.True(t, tryAdmitGitSession(slots), "releasing a Git subprocess slot permits a new session")
+}
+
+type failedGitClientWriter struct{}
+
+func (failedGitClientWriter) Write(_ []byte) (int, error) {
+	return 0, io.ErrClosedPipe
+}
+
+func TestForwardGitOutputCancelsOnClientFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// A network write failure must stop upload-pack promptly instead of
+	// consuming a bounded anonymous Git session slot until its timeout.
+	forwardGitOutput(failedGitClientWriter{}, strings.NewReader("git payload"), cancel)
+	assert.ErrorIs(t, ctx.Err(), context.Canceled)
+
+	// A successful response does not cancel the Git process early; normal
+	// Git client half-closes and completed upload-pack sessions stay valid.
+	goodCtx, goodCancel := context.WithCancel(context.Background())
+	defer goodCancel()
+	var output bytes.Buffer
+	forwardGitOutput(&output, strings.NewReader("git payload"), goodCancel)
+	assert.NoError(t, goodCtx.Err())
+	assert.Equal(t, "git payload", output.String())
 }

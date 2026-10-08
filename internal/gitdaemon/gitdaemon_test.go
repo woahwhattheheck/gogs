@@ -75,13 +75,14 @@ func TestReadPacketLine(t *testing.T) {
 
 func TestParseRequest(t *testing.T) {
 	tests := []struct {
-		name       string
-		payload    string
-		expErr     bool
-		expService string
-		expPath    string
-		expOwner   string
-		expRepo    string
+		name        string
+		payload     string
+		expErr      bool
+		expService  string
+		expPath     string
+		expOwner    string
+		expRepo     string
+		expWiki     bool
 		expProtocol string
 	}{
 		{
@@ -93,21 +94,21 @@ func TestParseRequest(t *testing.T) {
 			expRepo:    "repo",
 		},
 		{
-			name:       "upload-pack with protocol version",
-			payload:    "git-upload-pack /alice/repo.git\x00host=example.com\x00\x00version=1\x00",
+			name:        "upload-pack with protocol version",
+			payload:     "git-upload-pack /alice/repo.git\x00host=example.com\x00\x00version=1\x00",
 			expProtocol: "version=1",
-			expService: "git-upload-pack",
-			expPath:    "alice/repo.git",
-			expOwner:   "alice",
-			expRepo:    "repo",
+			expService:  "git-upload-pack",
+			expPath:     "alice/repo.git",
+			expOwner:    "alice",
+			expRepo:     "repo",
 		},
 		{
-			name:       "upload-pack Git protocol v2",
-			payload:    "git-upload-pack /alice/repo.git\x00host=example.com\x00\x00version=2\x00",
-			expService: "git-upload-pack",
-			expPath:    "alice/repo.git",
-			expOwner:   "alice",
-			expRepo:    "repo",
+			name:        "upload-pack Git protocol v2",
+			payload:     "git-upload-pack /alice/repo.git\x00host=example.com\x00\x00version=2\x00",
+			expService:  "git-upload-pack",
+			expPath:     "alice/repo.git",
+			expOwner:    "alice",
+			expRepo:     "repo",
 			expProtocol: "version=2",
 		},
 		{
@@ -141,14 +142,38 @@ func TestParseRequest(t *testing.T) {
 			expPath:    "alice/repo.wiki.git",
 			expOwner:   "alice",
 			expRepo:    "repo",
+			expWiki:    true,
+		},
+		{
+			name:       "wiki repository without .git suffix",
+			payload:    "git-upload-pack /alice/repo.wiki\x00host=example.com\x00",
+			expService: "git-upload-pack",
+			expPath:    "alice/repo.wiki.git",
+			expOwner:   "alice",
+			expRepo:    "repo",
+			expWiki:    true,
+		},
+		{
+			name:       "mixed-case wiki repository",
+			payload:    "git-upload-pack /Alice/Repo.WIKI.git\x00host=example.com\x00",
+			expService: "git-upload-pack",
+			expPath:    "alice/repo.wiki.git",
+			expOwner:   "alice",
+			expRepo:    "repo",
+			expWiki:    true,
 		},
 		{
 			name:       "path without .git suffix",
 			payload:    "git-upload-pack /alice/repo\x00host=example.com\x00",
 			expService: "git-upload-pack",
-			expPath:    "alice/repo",
+			expPath:    "alice/repo.git",
 			expOwner:   "alice",
 			expRepo:    "repo",
+		},
+		{
+			name:    "empty wiki repository name",
+			payload: "git-upload-pack /alice/.wiki.git\x00host=example.com\x00",
+			expErr:  true,
 		},
 		{
 			name:    "receive-pack is rejected",
@@ -208,6 +233,7 @@ func TestParseRequest(t *testing.T) {
 			assert.Equal(t, test.expPath, got.path)
 			assert.Equal(t, test.expOwner, got.owner)
 			assert.Equal(t, test.expRepo, got.repo)
+			assert.Equal(t, test.expWiki, got.wiki)
 			assert.Equal(t, test.expProtocol, got.gitProtocol)
 		})
 	}

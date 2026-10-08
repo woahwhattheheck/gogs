@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"gogs.io/gogs/internal/conf"
 	"gogs.io/gogs/internal/database"
 )
 
@@ -244,4 +246,25 @@ func TestSendError(t *testing.T) {
 	got := buf.String()
 	payload := fmt.Sprintf("ERR %s\n", "repository not found")
 	assert.Equal(t, fmt.Sprintf("%04x%s", len(payload)+4, payload), got)
+}
+
+func TestGitSessionLimits(t *testing.T) {
+	maxConnections, timeout := gitSessionLimits(conf.GitProtocolOpts{})
+	assert.Equal(t, 32, maxConnections)
+	assert.Equal(t, 15*time.Minute, timeout)
+
+	maxConnections, timeout = gitSessionLimits(conf.GitProtocolOpts{
+		MaxConnections: 2,
+		SessionTimeoutSeconds: 45,
+	})
+	assert.Equal(t, 2, maxConnections)
+	assert.Equal(t, 45*time.Second, timeout)
+}
+
+func TestGitSessionAdmission(t *testing.T) {
+	slots := make(chan struct{}, 1)
+	assert.True(t, tryAdmitGitSession(slots))
+	assert.False(t, tryAdmitGitSession(slots), "an occupied Git subprocess slot must reject new sessions")
+	<-slots
+	assert.True(t, tryAdmitGitSession(slots), "releasing a Git subprocess slot permits a new session")
 }

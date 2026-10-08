@@ -177,6 +177,8 @@ func Init(customConf string) error {
 	// **************************************
 
 	GitProtocol.ListenPort = 9418
+	GitProtocol.MaxConnections = 32
+	GitProtocol.SessionTimeoutSeconds = 900
 	if err = File.Section("server").MapTo(&GitProtocol); err != nil {
 		return errors.Wrap(err, "mapping Git protocol settings from [server] section")
 	}

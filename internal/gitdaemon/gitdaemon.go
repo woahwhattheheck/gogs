@@ -27,8 +27,36 @@ var allowedServices = map[string]bool{
 	"git-upload-archive": true,
 }
 
-// maxRequestLineLen is the sanity bound for the initial service request.
-const maxRequestLineLen = 1024
+// Protocol handshake and anonymous Git subprocesses need independent limits.
+const (
+	maxRequestLineLen        = 1024
+	defaultMaxGitConnections = 32
+	defaultGitSessionTimeout = 15 * time.Minute
+)
+
+// gitSessionLimits ensures callers with zero-valued options also have limits.
+// Operators can override these defaults in the [server] configuration.
+func gitSessionLimits(opts conf.GitProtocolOpts) (int, time.Duration) {
+	maxConnections := opts.MaxConnections
+	if maxConnections <= 0 {
+		maxConnections = defaultMaxGitConnections
+	}
+	timeout := time.Duration(opts.SessionTimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = defaultGitSessionTimeout
+	}
+	return maxConnections, timeout
+}
+
+// tryAdmitGitSession never blocks accept while all backend process slots are occupied.
+func tryAdmitGitSession(slots chan struct{}) bool {
+	select {
+	case slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
 
 // request is a parsed Git protocol service request.
 type request struct {
@@ -138,10 +166,14 @@ func canServeAnonymousGit(repo *database.Repository, wiki, requireSignin bool) b
 }
 
 // handleConn serves a single Git protocol connection.
-func handleConn(conn net.Conn) {
+func handleConn(conn net.Conn, sessionTimeout time.Duration) {
 	defer func() {
 		_ = conn.Close()
 	}()
+	// Bound database lookup, Git subprocess lifetime, and network copies as a
+	// single session. CommandContext kills Git if a client stalls.
+	ctx, cancel := context.WithTimeout(context.Background(), sessionTimeout)
+	defer cancel()
 	remote := conn.RemoteAddr()
 	log.Trace("Git protocol: connection from %s", remote)
 
@@ -168,7 +200,6 @@ func handleConn(conn net.Conn) {
 		return
 	}
 
-	ctx := context.Background()
 	owner, err := database.Handle.Users().GetByUsername(ctx, req.owner)
 	if err != nil {
 		if !database.IsErrUserNotExist(err) {
@@ -192,13 +223,15 @@ func handleConn(conn net.Conn) {
 		return
 	}
 
-	if err := conn.SetDeadline(time.Time{}); err != nil {
-		log.Trace("Git protocol: failed to clear deadline [%s]: %v", remote, err)
+	// Do not clear the wire deadline after authentication. A slow reader or
+	// writer must not be able to hold an upload-pack child indefinitely.
+	if err := conn.SetDeadline(time.Now().Add(sessionTimeout)); err != nil {
+		log.Trace("Git protocol: failed to set session deadline [%s]: %v", remote, err)
 		return
 	}
 
 	// Delegate the session to the Git backend, e.g. "git upload-pack owner/repo.git".
-	cmd := exec.Command("git", strings.TrimPrefix(req.service, "git-"), req.path)
+	cmd := exec.CommandContext(ctx, "git", strings.TrimPrefix(req.service, "git-"), req.path)
 	cmd.Dir = conf.Repository.Root
 	// Without this, Git always answers with the legacy advertisement even if
 	// a modern git:// client requested protocol v2. Explicitly override any
@@ -248,6 +281,8 @@ func Listen(opts conf.GitProtocolOpts) {
 	if err != nil {
 		log.Fatal("Git protocol: failed to start server: %v", err)
 	}
+	maxConnections, sessionTimeout := gitSessionLimits(opts)
+	slots := make(chan struct{}, maxConnections)
 	go func() {
 		for {
 			conn, err := listener.Accept()
@@ -255,7 +290,16 @@ func Listen(opts conf.GitProtocolOpts) {
 				log.Error("Git protocol: error accepting incoming connection: %v", err)
 				continue
 			}
-			go handleConn(conn)
+			if !tryAdmitGitSession(slots) {
+				// Close immediately: no unbounded rejection goroutines or
+				// blocked error writes under a connection flood.
+				_ = conn.Close()
+				continue
+			}
+			go func() {
+				defer func() { <-slots }()
+				handleConn(conn, sessionTimeout)
+			}()
 		}
 	}()
 }

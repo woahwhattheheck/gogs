@@ -148,7 +148,12 @@ func requestedGitProtocol(payload []byte) string {
 // "git-upload-pack /owner/repo.git\x00host=example.com\x00".
 func parseRequest(payload []byte) (*request, error) {
 	// Repository request precedes NUL-separated host and optional protocol version.
-	line, _, _ := strings.Cut(string(payload), "\x00")
+	// The pathname terminator is mandatory in the git transport grammar; without
+	// it the client has not sent a complete service request.
+	line, _, foundTerminator := strings.Cut(string(payload), "\x00")
+	if !foundTerminator {
+		return nil, errors.New("service request missing NUL terminator")
+	}
 
 	fields := strings.Fields(line)
 	if len(fields) != 2 {

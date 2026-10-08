@@ -105,10 +105,25 @@ func sendError(w io.Writer, msg string) {
 // through to Git. Git protocol v2 requires GIT_PROTOCOL=version=2 for upload-pack.
 func requestedGitProtocol(payload []byte) string {
 	parts := strings.Split(string(payload), "\x00")
-	if len(parts) < 5 || parts[2] != "" {
+	if len(parts) < 3 {
 		return ""
 	}
-	for _, part := range parts[3 : len(parts)-1] {
+
+	// The host parameter is optional. Extra parameters are introduced by an
+	// empty NUL-delimited field whether or not host= was sent.
+	extraStart := 1
+	if parts[extraStart] != "" {
+		if !strings.HasPrefix(parts[extraStart], "host=") {
+			return ""
+		}
+		extraStart++
+	}
+	if extraStart >= len(parts)-1 || parts[extraStart] != "" {
+		return ""
+	}
+	extraStart++
+
+	for _, part := range parts[extraStart : len(parts)-1] {
 		if part == "version=1" || part == "version=2" {
 			return part
 		}

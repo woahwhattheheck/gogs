@@ -1,6 +1,7 @@
 package gitdaemon
 
 import (
+	"gogs.io/gogs/internal/database"
 	"bytes"
 	"fmt"
 	"testing"
@@ -177,6 +178,31 @@ func TestParseRequest(t *testing.T) {
 			assert.Equal(t, test.expPath, got.path)
 			assert.Equal(t, test.expOwner, got.owner)
 			assert.Equal(t, test.expRepo, got.repo)
+		})
+	}
+}
+
+func TestAnonymousGitReadPolicy(t *testing.T) {
+	tests := []struct {
+		name          string
+		repo          database.Repository
+		wiki          bool
+		requireSignin bool
+		want          bool
+	}{
+		{"public repository", database.Repository{}, false, false, true},
+		{"public repository despite disabled wiki", database.Repository{}, false, false, true},
+		{"enabled internal wiki", database.Repository{EnableWiki: true}, true, false, true},
+		{"disabled wiki", database.Repository{EnableWiki: false}, true, false, false},
+		{"externally hosted wiki", database.Repository{EnableWiki: true, EnableExternalWiki: true}, true, false, false},
+		{"private repository", database.Repository{IsPrivate: true}, false, false, false},
+		{"private wiki", database.Repository{IsPrivate: true, EnableWiki: true}, true, false, false},
+		{"sign-in required for repository", database.Repository{}, false, true, false},
+		{"sign-in required for wiki", database.Repository{EnableWiki: true}, true, true, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, canServeAnonymousGit(&tc.repo, tc.wiki, tc.requireSignin))
 		})
 	}
 }

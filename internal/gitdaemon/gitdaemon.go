@@ -109,6 +109,15 @@ func parseRequest(payload []byte) (*request, error) {
 	}, nil
 }
 
+// canServeAnonymousGit enforces the repository visibility policy and prevents
+// wiki Git URLs from bypassing disabled or externally hosted wiki settings.
+func canServeAnonymousGit(repo *database.Repository, wiki, requireSignin bool) bool {
+	if repo.IsPrivate || requireSignin {
+		return false
+	}
+	return !wiki || (repo.EnableWiki && !repo.EnableExternalWiki)
+}
+
 // handleConn serves a single Git protocol connection.
 func handleConn(conn net.Conn) {
 	defer func() {
@@ -158,9 +167,8 @@ func handleConn(conn net.Conn) {
 		return
 	}
 
-	// Anonymous access is only allowed for pulling from public repositories,
-	// matching the HTTP Git access rule.
-	if repo.IsPrivate || conf.Auth.RequireSigninView {
+	// Public Git access must not expose a disabled or externally hosted wiki.
+	if !canServeAnonymousGit(repo, strings.HasSuffix(req.path, ".wiki.git"), conf.Auth.RequireSigninView) {
 		fail("access denied", nil)
 		return
 	}

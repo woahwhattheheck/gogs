@@ -211,7 +211,7 @@ func handleConn(conn net.Conn) {
 
 // Listen starts a Git protocol server listening on the given host and port.
 func Listen(opts conf.GitProtocolOpts) {
-	listener, err := net.Listen("tcp", opts.ListenHost+":"+strconv.Itoa(opts.ListenPort))
+	listener, err := net.Listen("tcp", net.JoinHostPort(opts.ListenHost, strconv.Itoa(opts.ListenPort)))
 	if err != nil {
 		log.Fatal("Git protocol: failed to start server: %v", err)
 	}

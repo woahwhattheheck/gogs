@@ -1,13 +1,14 @@
 package gitdaemon
 
 import (
-	"gogs.io/gogs/internal/database"
 	"bytes"
 	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gogs.io/gogs/internal/database"
 )
 
 func pktLine(payload string) string {
@@ -191,7 +192,7 @@ func TestAnonymousGitReadPolicy(t *testing.T) {
 		want          bool
 	}{
 		{"public repository", database.Repository{}, false, false, true},
-		{"public repository despite disabled wiki", database.Repository{}, false, false, true},
+		{"public repository despite externally hosted wiki", database.Repository{EnableExternalWiki: true}, false, false, true},
 		{"enabled internal wiki", database.Repository{EnableWiki: true}, true, false, true},
 		{"disabled wiki", database.Repository{EnableWiki: false}, true, false, false},
 		{"externally hosted wiki", database.Repository{EnableWiki: true, EnableExternalWiki: true}, true, false, false},

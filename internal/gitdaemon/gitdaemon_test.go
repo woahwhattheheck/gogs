@@ -115,6 +115,15 @@ func TestParseRequest(t *testing.T) {
 			expProtocol: "version=2",
 		},
 		{
+			name:        "upload-pack Git protocol v2 without host parameter",
+			payload:     "git-upload-pack /alice/repo.git\x00\x00version=2\x00",
+			expService:  "git-upload-pack",
+			expPath:     "alice/repo.git",
+			expOwner:    "alice",
+			expRepo:     "repo",
+			expProtocol: "version=2",
+		},
+		{
 			name:       "unrecognized protocol extra is ignored",
 			payload:    "git-upload-pack /alice/repo.git\x00host=example.com\x00\x00GIT_PROTOCOL=version=2\x00version=3\x00",
 			expService: "git-upload-pack",

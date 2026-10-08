@@ -290,6 +290,23 @@ func TestGitSessionLimits(t *testing.T) {
 	assert.Equal(t, 45*time.Second, timeout)
 }
 
+func TestGitAcceptRetryDelay(t *testing.T) {
+	// Persistent accept errors must never hot-spin or grow sleep indefinitely.
+	delay := time.Duration(0)
+	for i := 0; i < 20; i++ {
+		next := nextGitAcceptRetryDelay(delay)
+		assert.Greater(t, next, time.Duration(0))
+		assert.LessOrEqual(t, next, time.Second)
+		if delay > 0 {
+			assert.GreaterOrEqual(t, next, delay)
+		}
+		delay = next
+	}
+	assert.Equal(t, time.Second, delay)
+	// The successful-Accept branch resets retryDelay to zero.
+	assert.Equal(t, 5*time.Millisecond, nextGitAcceptRetryDelay(0))
+}
+
 func TestGitSessionAdmission(t *testing.T) {
 	slots := make(chan struct{}, 1)
 	assert.True(t, tryAdmitGitSession(slots))

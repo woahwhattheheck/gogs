@@ -297,6 +297,18 @@ func forwardGitOutput(dst io.Writer, src io.Reader, cancel context.CancelFunc) {
 	}
 }
 
+// nextGitAcceptRetryDelay caps retries for persistent listener failures.
+// Without a delay, exhausted file descriptors can spin and flood the log.
+func nextGitAcceptRetryDelay(previous time.Duration) time.Duration {
+	if previous <= 0 {
+		return 5 * time.Millisecond
+	}
+	if previous >= time.Second/2 {
+		return time.Second
+	}
+	return previous * 2
+}
+
 // Listen starts a Git protocol server listening on the given host and port.
 func Listen(opts conf.GitProtocolOpts) {
 	listener, err := net.Listen("tcp", net.JoinHostPort(opts.ListenHost, strconv.Itoa(opts.ListenPort)))
@@ -306,12 +318,21 @@ func Listen(opts conf.GitProtocolOpts) {
 	maxConnections, sessionTimeout := gitSessionLimits(opts)
 	slots := make(chan struct{}, maxConnections)
 	go func() {
+		var retryDelay time.Duration
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
-				log.Error("Git protocol: error accepting incoming connection: %v", err)
+				if errors.Is(err, net.ErrClosed) {
+					// An intentionally closed listener cannot accept again.
+					return
+				}
+				retryDelay = nextGitAcceptRetryDelay(retryDelay)
+				log.Error("Git protocol: error accepting incoming connection: %v; retrying in %s", err, retryDelay)
+				// Avoid hot-spinning on repeated temporary/permanent accept errors.
+				time.Sleep(retryDelay)
 				continue
 			}
+			retryDelay = 0
 			if !tryAdmitGitSession(slots) {
 				// Close immediately: no unbounded rejection goroutines or
 				// blocked error writes under a connection flood.

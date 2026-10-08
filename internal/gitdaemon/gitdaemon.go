@@ -280,10 +280,20 @@ func handleConn(conn net.Conn, sessionTimeout time.Duration) {
 	go func() {
 		_, _ = io.Copy(io.Discard, stderr)
 	}()
-	_, _ = io.Copy(conn, stdout)
+	forwardGitOutput(conn, stdout, cancel)
 
 	if err = cmd.Wait(); err != nil {
 		log.Trace("Git protocol: %q exited for %s: %v", req.service, remote, err)
+	}
+}
+
+// forwardGitOutput aborts Git when the client stops accepting output. A
+// disconnected client must not pin a bounded session slot and upload-pack
+// subprocess until the full session timeout. Successful transfers and
+// ordinary client write-side half-closes do not cancel the process.
+func forwardGitOutput(dst io.Writer, src io.Reader, cancel context.CancelFunc) {
+	if _, err := io.Copy(dst, src); err != nil {
+		cancel()
 	}
 }
 

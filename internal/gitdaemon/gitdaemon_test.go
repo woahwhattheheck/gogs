@@ -299,6 +299,22 @@ func TestGitSessionLimits(t *testing.T) {
 	assert.Equal(t, 45*time.Second, timeout)
 }
 
+func TestGitSessionDeadlines(t *testing.T) {
+	now := time.Unix(123, 0)
+
+	// A configured timeout shorter than the ordinary handshake cap owns the
+	// whole connection lifetime, including the initial pkt-line.
+	handshake, session := gitSessionDeadlines(now, 5*time.Second)
+	assert.Equal(t, now.Add(5*time.Second), handshake)
+	assert.Equal(t, now.Add(5*time.Second), session)
+
+	// Longer sessions retain the 30-second handshake cap, but both deadlines
+	// remain anchored to the same connection start time.
+	handshake, session = gitSessionDeadlines(now, 45*time.Second)
+	assert.Equal(t, now.Add(30*time.Second), handshake)
+	assert.Equal(t, now.Add(45*time.Second), session)
+}
+
 func TestGitAcceptRetryDelay(t *testing.T) {
 	// Persistent accept errors must never hot-spin or grow sleep indefinitely.
 	delay := time.Duration(0)

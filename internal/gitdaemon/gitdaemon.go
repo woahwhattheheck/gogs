@@ -48,6 +48,18 @@ func gitSessionLimits(opts conf.GitProtocolOpts) (int, time.Duration) {
 	return maxConnections, timeout
 }
 
+// gitSessionDeadlines anchors every connection to one overall wall-clock
+// lifetime. The handshake keeps its stricter 30-second cap without ever
+// outliving the configured session timeout.
+func gitSessionDeadlines(now time.Time, sessionTimeout time.Duration) (time.Time, time.Time) {
+	sessionDeadline := now.Add(sessionTimeout)
+	handshakeDeadline := now.Add(30 * time.Second)
+	if sessionDeadline.Before(handshakeDeadline) {
+		handshakeDeadline = sessionDeadline
+	}
+	return handshakeDeadline, sessionDeadline
+}
+
 // tryAdmitGitSession never blocks accept while all backend process slots are occupied.
 func tryAdmitGitSession(slots chan struct{}) bool {
 	select {
@@ -197,9 +209,12 @@ func handleConn(conn net.Conn, sessionTimeout time.Duration) {
 	defer func() {
 		_ = conn.Close()
 	}()
-	// Bound database lookup, Git subprocess lifetime, and network copies as a
-	// single session. CommandContext kills Git if a client stalls.
-	ctx, cancel := context.WithTimeout(context.Background(), sessionTimeout)
+	// Bound handshake, database lookup, Git subprocess lifetime, and network
+	// copies to one absolute session deadline. CommandContext kills Git if a
+	// client stalls.
+	now := time.Now()
+	handshakeDeadline, sessionDeadline := gitSessionDeadlines(now, sessionTimeout)
+	ctx, cancel := context.WithDeadline(context.Background(), sessionDeadline)
 	defer cancel()
 	remote := conn.RemoteAddr()
 	log.Trace("Git protocol: connection from %s", remote)
@@ -211,8 +226,9 @@ func handleConn(conn net.Conn, sessionTimeout time.Duration) {
 		sendError(conn, msg)
 	}
 
-	// The client is expected to send the service request promptly.
-	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+	// The client is expected to send the service request promptly. A short
+	// configured session timeout is stricter than the ordinary 30-second cap.
+	if err := conn.SetDeadline(handshakeDeadline); err != nil {
 		log.Trace("Git protocol: failed to set handshake deadline [%s]: %v", remote, err)
 		return
 	}
@@ -250,9 +266,9 @@ func handleConn(conn net.Conn, sessionTimeout time.Duration) {
 		return
 	}
 
-	// Do not clear the wire deadline after authentication. A slow reader or
-	// writer must not be able to hold an upload-pack child indefinitely.
-	if err := conn.SetDeadline(time.Now().Add(sessionTimeout)); err != nil {
+	// Reuse the original absolute deadline after authentication. Do not grant
+	// the session a fresh timeout budget just because the handshake completed.
+	if err := conn.SetDeadline(sessionDeadline); err != nil {
 		log.Trace("Git protocol: failed to set session deadline [%s]: %v", remote, err)
 		return
 	}

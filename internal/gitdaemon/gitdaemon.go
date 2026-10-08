@@ -251,7 +251,7 @@ func handleConn(conn net.Conn, sessionTimeout time.Duration) {
 		fail("repository not found", nil)
 		return
 	}
-	repo, err := database.GetRepositoryByName(owner.ID, req.repo)
+	repo, err := database.Handle.Repositories().GetByName(ctx, owner.ID, req.repo)
 	if err != nil {
 		if !database.IsErrRepoNotExist(err) {
 			log.Error("Git protocol: failed to get repository %q/%q: %v", req.owner, req.repo, err)

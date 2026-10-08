@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -35,6 +36,7 @@ type request struct {
 	path    string // repository path relative to the repository root, e.g. "owner/repo.git"
 	owner   string // lowercased owner name for database lookup
 	repo    string // lowercased repository name for database lookup
+	gitProtocol string // explicitly requested, supported protocol negotiation (v1 or v2)
 }
 
 // readPacketLine reads a single pkt-line from r and returns its payload.
@@ -68,12 +70,28 @@ func sendError(w io.Writer, msg string) {
 	_, _ = io.WriteString(w, packetWrite(fmt.Sprintf("ERR %s\n", msg)))
 }
 
+// requestedGitProtocol reads only the wire-defined "version" parameter, which
+// comes after the host field and an empty NUL-delimited separator. Never pass
+// arbitrary client-provided environment variables or unrecognized parameters
+// through to Git. Git protocol v2 requires GIT_PROTOCOL=version=2 for upload-pack.
+func requestedGitProtocol(payload []byte) string {
+	parts := strings.Split(string(payload), "\x00")
+	if len(parts) < 5 || parts[2] != "" {
+		return ""
+	}
+	for _, part := range parts[3 : len(parts)-1] {
+		if part == "version=1" || part == "version=2" {
+			return part
+		}
+	}
+	return ""
+}
+
 // parseRequest parses the initial service request of the Git protocol, which
 // has the form "<service> <path>\x00<extra-parameters>...", e.g.
 // "git-upload-pack /owner/repo.git\x00host=example.com\x00".
 func parseRequest(payload []byte) (*request, error) {
-	// Extra parameters (e.g. host, protocol version) follow the first NUL byte
-	// and are not needed for serving the request.
+	// Repository request precedes NUL-separated host and optional protocol version.
 	line, _, _ := strings.Cut(string(payload), "\x00")
 
 	fields := strings.Fields(line)
@@ -106,6 +124,7 @@ func parseRequest(payload []byte) (*request, error) {
 		path:    strings.ToLower(repoPath),
 		owner:   strings.ToLower(ownerName),
 		repo:    strings.ToLower(repoName),
+		gitProtocol: requestedGitProtocol(payload),
 	}, nil
 }
 
@@ -181,6 +200,12 @@ func handleConn(conn net.Conn) {
 	// Delegate the session to the Git backend, e.g. "git upload-pack owner/repo.git".
 	cmd := exec.Command("git", strings.TrimPrefix(req.service, "git-"), req.path)
 	cmd.Dir = conf.Repository.Root
+	// Without this, Git always answers with the legacy advertisement even if
+	// a modern git:// client requested protocol v2. Explicitly override any
+	// inherited value, and forward only recognized, protocol-defined versions.
+	if req.service == "git-upload-pack" {
+		cmd.Env = append(os.Environ(), "GIT_PROTOCOL="+req.gitProtocol)
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
